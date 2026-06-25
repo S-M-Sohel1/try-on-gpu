@@ -22,6 +22,7 @@ class CatVTONRunner:
                     attn_ckpt_version="mix",
                     weight_dtype=torch.float16,
                     use_tf32=True,
+                    skip_safety_check=True,
                     device=self.device
                 )
             except ImportError as e:
