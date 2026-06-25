@@ -10,18 +10,20 @@ class CatVTONRunner:
         if self.device == "cuda":
             try:
                 # We assume CatVTON repo is cloned and added to sys.path in Colab
-                from model.pipelines import CatVTONPipeline
-                from diffusers import DDIMScheduler
+                from model.pipeline import CatVTONPipeline
+                from huggingface_hub import snapshot_download
                 
                 print("Loading CatVTON Pipeline... This will take a few minutes on first run.")
-                # Load CatVTON from HuggingFace
-                self.pipeline = CatVTONPipeline.from_pretrained(
-                    "zhengchong/CatVTON", 
-                    torch_dtype=torch.float16, 
-                    variant="fp16"
-                ).to(self.device)
                 
-                self.pipeline.scheduler = DDIMScheduler.from_config(self.pipeline.scheduler.config)
+                repo_path = snapshot_download(repo_id="zhengchong/CatVTON")
+                self.pipeline = CatVTONPipeline(
+                    base_ckpt="booksforcharlie/stable-diffusion-inpainting",
+                    attn_ckpt=repo_path,
+                    attn_ckpt_version="mix",
+                    weight_dtype=torch.float16,
+                    use_tf32=True,
+                    device=self.device
+                )
             except ImportError as e:
                 print(f"Warning: CatVTON imports failed: {e}. Ensure CatVTON is cloned and in sys.path.")
             except Exception as e:
@@ -59,7 +61,7 @@ class CatVTONRunner:
             num_inference_steps=50,
             guidance_scale=2.5,
             generator=generator
-        ).images[0]
+        )[0]
 
         # Resize back to original
         return result_image.resize(person_image.size)

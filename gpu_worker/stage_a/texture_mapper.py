@@ -14,7 +14,9 @@ class TextureMapper:
         if self.device == "cuda":
             self.pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
                 model_id, torch_dtype=torch.float16, safety_checker=None
-            ).to(self.device)
+            )
+            # Offload to CPU when not in use to save VRAM for CatVTON and Segformer
+            self.pipe.enable_model_cpu_offload()
         else:
             self.pipe = None # For local testing without GPU, we fallback to OpenCV only
             print("Warning: CUDA not found. Stage A Generative baking disabled. Using OpenCV fallback.")

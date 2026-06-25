@@ -29,7 +29,7 @@ def test_inference(url="https://pastime-confusion-job.ngrok-free.dev/"):
     payload = {
         "person_image": encode_image("inp.jpg"),
         "fabric_image": encode_image("SummerbreezeDesgin6fabric.webp"),
-        "garment_category": "upper"
+        "garment_category": "lower"
     }
 
     url = url.rstrip('/')
