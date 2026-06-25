@@ -84,7 +84,8 @@ async def infer(request: InferRequest):
     # Stage B: Auto-Mask Generation
     mask = mask_generator.generate_mask(
         person_image=person_img,
-        category=request.garment_category
+        category=request.garment_category,
+        garment_type=request.garment_type
     )
 
     # Stage B: CatVTON Inference
