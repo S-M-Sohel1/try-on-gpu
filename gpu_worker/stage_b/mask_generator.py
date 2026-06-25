@@ -43,8 +43,8 @@ class MaskGenerator:
         # Combine labels based on category
         target_labels = []
         if category == "upper":
-            # 4: Upper-clothes, 14: Left-arm, 15: Right-arm (CatVTON handles arms)
-            target_labels = ["Upper-clothes", "Left-arm", "Right-arm"]
+            # Masking ONLY Upper-clothes (4) prevents the model from erasing the user's actual arms/hands.
+            target_labels = ["Upper-clothes"]
         elif category == "lower":
             # 6: Pants, 5: Skirt, 12: Left-leg, 13: Right-leg
             target_labels = ["Pants", "Skirt", "Left-leg", "Right-leg"]
@@ -57,8 +57,8 @@ class MaskGenerator:
                 label_mask = np.array(result['mask'])
                 mask[label_mask > 0] = 255
 
-        # CatVTON works best if the mask is slightly dilated so it covers the boundaries
-        kernel = np.ones((15, 15), np.uint8)
+        # Reduce dilation so the mask doesn't bleed into the hands or neck!
+        kernel = np.ones((5, 5), np.uint8)
         mask = cv2.dilate(mask, kernel, iterations=1)
 
         return Image.fromarray(mask)
