@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+opencv-python-headless
+numpy
+torch
+torchvision
+diffusers
+transformers
+accelerate
+Pillow
+pyngrok
+requests
