@@ -21,7 +21,7 @@ class TextureMapper:
             self.pipe = None # For local testing without GPU, we fallback to OpenCV only
             print("Warning: CUDA not found. Stage A Generative baking disabled. Using OpenCV fallback.")
 
-    def apply_fabric(self, fabric_image: Image.Image, category: str, template_id: str = None) -> Image.Image:
+    def apply_fabric(self, fabric_image: Image.Image, category: str, garment_type: str = None, template_id: str = None) -> Image.Image:
         """
         Stage A: Texture Mapper.
         Tiles the fabric using OpenCV, then uses Stable Diffusion Img2Img 
@@ -33,10 +33,21 @@ class TextureMapper:
         template_mask = np.zeros((*target_size, 3), dtype=np.uint8)
         
         if category == "upper":
-            # Simple shirt silhouette scaled for 768x768
-            pts = np.array([[225, 150], [543, 150], [675, 300], [600, 450], 
-                            [525, 375], [525, 750], [243, 750], [243, 375], 
-                            [168, 450], [93, 300]], np.int32)
+            if garment_type and "t-shirt" in garment_type.lower():
+                # Short sleeves for t-shirt
+                pts = np.array([[240, 150], [528, 150], [675, 260], [630, 375], 
+                                [525, 300], [525, 675], [243, 675], [243, 300], 
+                                [138, 375], [93, 260]], np.int32)
+            elif garment_type and "punjabi" in garment_type.lower():
+                # Long body and long sleeves for punjabi/kurta
+                pts = np.array([[270, 150], [498, 150], [675, 300], [600, 450], 
+                                [525, 375], [525, 750], [243, 750], [243, 375], 
+                                [168, 450], [93, 300]], np.int32)
+            else:
+                # Default shirt silhouette
+                pts = np.array([[225, 150], [543, 150], [675, 300], [600, 450], 
+                                [525, 375], [525, 675], [243, 675], [243, 375], 
+                                [168, 450], [93, 300]], np.int32)
             cv2.fillPoly(template_mask, [pts], (255, 255, 255))
         elif category == "lower":
             # Simple pant silhouette scaled for 768x768
@@ -63,7 +74,12 @@ class TextureMapper:
 
         # Step 2: Generative Texture Baking (Img2Img)
         if self.pipe:
-            garment_name = "shirt" if category == "upper" else "pants"
+            # Use specific garment type for the prompt if provided
+            if garment_type:
+                garment_name = garment_type
+            else:
+                garment_name = "shirt" if category == "upper" else "pants"
+                
             prompt = f"a high quality product photography of a flat lay {garment_name} garment, realistic fabric folds, shadows, highly detailed"
             negative_prompt = "person, body, head, text, watermark, bad quality, 3d render"
             

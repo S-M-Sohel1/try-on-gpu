@@ -25,6 +25,7 @@ class InferRequest(BaseModel):
     person_image: str # base64 encoded image
     fabric_image: str # base64 encoded image
     garment_category: str # "upper", "lower", "overall"
+    garment_type: Optional[str] = None # e.g. "shirt", "t-shirt", "punjabi", "jeans"
     template_id: Optional[str] = None
 
 class InferResponse(BaseModel):
@@ -76,6 +77,7 @@ async def infer(request: InferRequest):
     canonical_garment = texture_mapper.apply_fabric(
         fabric_image=fabric_img,
         category=request.garment_category,
+        garment_type=request.garment_type,
         template_id=request.template_id
     )
 
