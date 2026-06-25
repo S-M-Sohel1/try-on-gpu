@@ -16,26 +16,28 @@ def decode_and_save_image(b64_str, output_path):
     with open(output_path, "wb") as f:
         f.write(image_data)
 
-def test_inference(url="http://127.0.0.1:8000"):
+def test_inference(url="https://pastime-confusion-job.ngrok-free.dev/"):
     # Create dummy images for testing
     from PIL import Image
     import numpy as np
 
-    person_img = Image.fromarray(np.ones((512, 512, 3), dtype=np.uint8) * 200)
-    person_img.save("dummy_person.jpg")
-    fabric_img = Image.fromarray(np.ones((200, 200, 3), dtype=np.uint8) * 100)
-    fabric_img.save("dummy_fabric.jpg")
+    # person_img = Image.fromarray(np.ones((512, 512, 3), dtype=np.uint8) * 200)
+    # person_img.save("dummy_person.jpg")
+    # fabric_img = Image.fromarray(np.ones((200, 200, 3), dtype=np.uint8) * 100)
+    # fabric_img.save("dummy_fabric.jpg")
 
     payload = {
-        "person_image": encode_image("dummy_person.jpg"),
-        "fabric_image": encode_image("dummy_fabric.jpg"),
+        "person_image": encode_image("Shanto.jpg"),
+        "fabric_image": encode_image("SummerbreezeDesgin6fabric.webp"),
         "garment_category": "upper"
     }
 
+    url = url.rstrip('/')
     print(f"Sending request to {url}/infer...")
     start = time.time()
     try:
-        response = requests.post(f"{url}/infer", json=payload)
+        headers = {"ngrok-skip-browser-warning": "true"}
+        response = requests.post(f"{url}/infer", json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         

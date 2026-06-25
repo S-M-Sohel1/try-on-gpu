@@ -1,28 +1,65 @@
 import torch
 from PIL import Image
-# from diffusers import DiffusionPipeline # Will be used in real implementation
 
 class CatVTONRunner:
     def __init__(self):
-        print("Initializing CatVTONRunner...")
+        print("Initializing Real CatVTON Try-On Model...")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        # In a real scenario we load CatVTON pipeline
-        # repo = "zhengchong/CatVTON"
-        # self.pipeline = DiffusionPipeline.from_pretrained(repo, torch_dtype=torch.float16).to(self.device)
+        self.pipeline = None
+
+        if self.device == "cuda":
+            try:
+                # We assume CatVTON repo is cloned and added to sys.path in Colab
+                from model.pipelines import CatVTONPipeline
+                from diffusers import DDIMScheduler
+                
+                print("Loading CatVTON Pipeline... This will take a few minutes on first run.")
+                # Load CatVTON from HuggingFace
+                self.pipeline = CatVTONPipeline.from_pretrained(
+                    "zhengchong/CatVTON", 
+                    torch_dtype=torch.float16, 
+                    variant="fp16"
+                ).to(self.device)
+                
+                self.pipeline.scheduler = DDIMScheduler.from_config(self.pipeline.scheduler.config)
+            except ImportError as e:
+                print(f"Warning: CatVTON imports failed: {e}. Ensure CatVTON is cloned and in sys.path.")
+            except Exception as e:
+                print(f"Failed to load CatVTON: {e}")
+        else:
+            print("Warning: CUDA not found. CatVTON requires GPU. Running dummy fallback.")
 
     def run(self, person_image: Image.Image, garment_image: Image.Image, mask: Image.Image) -> Image.Image:
         """
-        Stage B: CatVTON Inference.
-        Runs the CatVTON model to inpaint the canonical garment onto the person image.
+        Stage B: Real CatVTON Inference.
+        Runs CatVTON to inpaint the clothing realistically.
         """
-        # Prototype: simply composite the canonical garment onto the masked area of person image
-        # This is a dummy implementation for testing the pipeline flow.
-        
-        person_image = person_image.convert("RGBA")
-        garment_image = garment_image.resize(person_image.size).convert("RGBA")
-        mask = mask.resize(person_image.size).convert("L")
+        if not self.pipeline:
+            # Dummy fallback if model didn't load
+            person_image = person_image.convert("RGBA")
+            garment_image = garment_image.resize(person_image.size).convert("RGBA")
+            mask = mask.resize(person_image.size).convert("L")
+            result = Image.composite(garment_image, person_image, mask)
+            return result.convert("RGB")
 
-        # Paste the garment onto the person using the mask
-        result = Image.composite(garment_image, person_image, mask)
+        # CatVTON expects images to be standardized
+        target_size = (768, 768)
+        person_resized = person_image.resize(target_size).convert("RGB")
+        garment_resized = garment_image.resize(target_size).convert("RGB")
+        mask_resized = mask.resize(target_size).convert("L")
+
+        print("Running CatVTON inference...")
+        generator = torch.Generator(device=self.device).manual_seed(42)
         
-        return result.convert("RGB")
+        # Run inference
+        result_image = self.pipeline(
+            image=person_resized,
+            condition_image=garment_resized,
+            mask=mask_resized,
+            num_inference_steps=50,
+            guidance_scale=2.5,
+            generator=generator
+        ).images[0]
+
+        # Resize back to original
+        return result_image.resize(person_image.size)

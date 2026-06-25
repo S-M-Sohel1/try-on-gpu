@@ -11,3 +11,6 @@ accelerate
 Pillow
 pyngrok
 requests
+scipy
+peft
+xformers
