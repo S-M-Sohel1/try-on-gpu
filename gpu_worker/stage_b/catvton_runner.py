@@ -1,4 +1,5 @@
 import torch
+from diffusers import VaeImageProcessor
 from PIL import Image
 
 class CatVTONRunner:
@@ -6,15 +7,24 @@ class CatVTONRunner:
         print("Initializing Real CatVTON Try-On Model...")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.pipeline = None
+        # CatVTON's expected resolution (portrait, not square!)
+        self.width = 768
+        self.height = 1024
+        self.mask_processor = VaeImageProcessor(
+            vae_scale_factor=8,
+            do_normalize=False,
+            do_binarize=True,
+            do_convert_grayscale=True
+        )
 
         if self.device == "cuda":
             try:
                 # We assume CatVTON repo is cloned and added to sys.path in Colab
                 from model.pipeline import CatVTONPipeline
                 from huggingface_hub import snapshot_download
-                
+
                 print("Loading CatVTON Pipeline... This will take a few minutes on first run.")
-                
+
                 repo_path = snapshot_download(repo_id="zhengchong/CatVTON")
                 self.pipeline = CatVTONPipeline(
                     base_ckpt="booksforcharlie/stable-diffusion-inpainting",
@@ -25,6 +35,7 @@ class CatVTONRunner:
                     skip_safety_check=True,
                     device=self.device
                 )
+                print("CatVTON loaded successfully.")
             except ImportError as e:
                 print(f"Warning: CatVTON imports failed: {e}. Ensure CatVTON is cloned and in sys.path.")
             except Exception as e:
@@ -35,7 +46,9 @@ class CatVTONRunner:
     def run(self, person_image: Image.Image, garment_image: Image.Image, mask: Image.Image) -> Image.Image:
         """
         Stage B: Real CatVTON Inference.
-        Runs CatVTON to inpaint the clothing realistically.
+        person_image: Photo of the person
+        garment_image: Product photo of the garment (white background, flat lay)
+        mask: Binary mask of the region to replace on the person
         """
         if not self.pipeline:
             # Dummy fallback if model didn't load
@@ -45,24 +58,27 @@ class CatVTONRunner:
             result = Image.composite(garment_image, person_image, mask)
             return result.convert("RGB")
 
-        # CatVTON expects images to be standardized
-        target_size = (768, 768)
-        person_resized = person_image.resize(target_size).convert("RGB")
-        garment_resized = garment_image.resize(target_size).convert("RGB")
-        mask_resized = mask.resize(target_size).convert("L")
-
+        orig_size = person_image.size  # save to restore at the end
         print("Running CatVTON inference...")
         generator = torch.Generator(device=self.device).manual_seed(42)
-        
-        # Run inference
+
+        # Blur the mask edges for smoother blending (as done in the official CatVTON app)
+        mask_blurred = self.mask_processor.blur(mask, blur_factor=9)
+
+        # CatVTON check_inputs:
+        # - person + mask -> resize_and_crop to (width, height)
+        # - garment       -> resize_and_padding to (width, height)
+        # We pass PIL images directly and let CatVTON handle all resizing internally.
         result_image = self.pipeline(
-            image=person_resized,
-            condition_image=garment_resized,
-            mask=mask_resized,
+            image=person_image.convert("RGB"),
+            condition_image=garment_image.convert("RGB"),
+            mask=mask_blurred,
             num_inference_steps=50,
             guidance_scale=2.5,
+            height=self.height,
+            width=self.width,
             generator=generator
         )[0]
 
-        # Resize back to original
-        return result_image.resize(person_image.size)
+        # Resize back to original person image size
+        return result_image.resize(orig_size, Image.LANCZOS)
