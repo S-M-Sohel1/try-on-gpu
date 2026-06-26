@@ -14,3 +14,4 @@ requests
 scipy
 peft
 xformers
+pillow-avif-plugin

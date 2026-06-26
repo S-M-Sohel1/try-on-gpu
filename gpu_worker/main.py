@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
+import pillow_avif
 from typing import Optional
 
 from stage_a.texture_mapper import TextureMapper
