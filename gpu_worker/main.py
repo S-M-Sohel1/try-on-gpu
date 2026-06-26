@@ -22,13 +22,13 @@ app.add_middleware(
 )
 
 class InferRequest(BaseModel):
-    person_image: str  # base64 encoded image
-    garment_image: str # base64 encoded product photo of the garment (white background)
-    garment_category: str  # "upper", "lower", "overall"
-    garment_type: Optional[str] = None  # e.g. "shirt", "t-shirt", "punjabi", "jeans"
+    person_image: str   # base64 encoded image
+    garment_image: str  # base64 encoded product photo (white background, flat lay)
+    garment_category: str       # "upper", "lower", or "overall"
+    garment_type: Optional[str] = None  # e.g. "shirt", "t-shirt", "punjabi", "kurta", "jeans"
 
 class InferResponse(BaseModel):
-    output_image: str  # base64 encoded image
+    output_image: str  # base64 encoded result
     model_used: str
 
 mask_generator = None
@@ -38,13 +38,17 @@ catvton_runner = None
 async def startup_event():
     global mask_generator, catvton_runner
     print("Initializing models... This may take a while.")
-    mask_generator = MaskGenerator()
+
+    # CatVTONRunner downloads the HF repo and exposes repo_path
     catvton_runner = CatVTONRunner()
-    print("Models initialized successfully.")
+
+    # MaskGenerator uses repo_path to find SCHP + DensePose checkpoints
+    mask_generator = MaskGenerator(repo_path=catvton_runner.repo_path)
+
+    print("All models initialized successfully.")
 
 def decode_image(b64_str: str) -> Image.Image:
     try:
-        # Remove header if present (e.g., data:image/jpeg;base64,)
         if "," in b64_str:
             b64_str = b64_str.split(",")[1]
         image_data = base64.b64decode(b64_str)
@@ -56,38 +60,35 @@ def decode_image(b64_str: str) -> Image.Image:
 def encode_image(image: Image.Image) -> str:
     buffered = io.BytesIO()
     image.save(buffered, format="JPEG", quality=95)
-    img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return f"data:image/jpeg;base64,{img_str}"
+    return "data:image/jpeg;base64," + base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 @app.post("/infer", response_model=InferResponse)
 async def infer(request: InferRequest):
     if request.garment_category not in ["upper", "lower", "overall"]:
-        raise HTTPException(status_code=400, detail="Invalid garment_category. Use 'upper', 'lower', or 'overall'.")
+        raise HTTPException(status_code=400, detail="garment_category must be 'upper', 'lower', or 'overall'.")
 
-    print(f"Starting inference for category: {request.garment_category}, type: {request.garment_type}")
+    print(f"Starting inference | category={request.garment_category} | type={request.garment_type}")
     start_time = time.time()
 
     person_img = decode_image(request.person_image)
     garment_img = decode_image(request.garment_image)
 
-    # Stage B: Auto-Mask Generation — segment the clothing region on the person
+    # Generate cloth-agnostic mask using CatVTON's AutoMasker
     mask = mask_generator.generate_mask(
         person_image=person_img,
         category=request.garment_category,
         garment_type=request.garment_type
     )
 
-    # Stage B: CatVTON Inference — composite garment product photo onto masked person
+    # Run CatVTON inpainting
     output_image = catvton_runner.run(
         person_image=person_img,
         garment_image=garment_img,
         mask=mask
     )
 
-    encoded_output = encode_image(output_image)
-
     print(f"Inference completed in {time.time() - start_time:.2f} seconds")
-    return InferResponse(output_image=encoded_output, model_used="CatVTON")
+    return InferResponse(output_image=encode_image(output_image), model_used="CatVTON+AutoMasker")
 
 @app.get("/health")
 def health_check():

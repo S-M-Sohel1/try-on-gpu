@@ -1,91 +1,99 @@
+import os
 import cv2
 import numpy as np
 import torch
 from PIL import Image
-from transformers import pipeline
+
+# Garment types that require a longer / full-body mask
+LONG_UPPER_GARMENTS = {"punjabi", "kurta", "kameez", "sherwani", "jubba", "thobe", "abaya"}
 
 class MaskGenerator:
-    def __init__(self):
-        print("Initializing AI Mask Generator (Segformer)...")
-        self.device = 0 if torch.cuda.is_available() else -1
+    def __init__(self, repo_path: str = None):
+        """
+        repo_path: Path to the locally downloaded zhengchong/CatVTON repo 
+                   (returned by snapshot_download). Contains SCHP/ and DensePose/ folders.
+        """
+        self.automasker = None
+        self.mask_processor = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        device_str = "cuda" if self.device == "cuda" else "cpu"
 
-        try:
-            self.segmenter = pipeline(
-                "image-segmentation",
-                model="mattmdjaga/segformer_b2_clothes",
-                device=self.device
-            )
-        except Exception as e:
-            print(f"Warning: Failed to load segformer: {e}. Masking will fallback.")
-            self.segmenter = None
+        if repo_path and self.device == "cuda":
+            try:
+                # AutoMasker lives inside the CatVTON repo — must be in sys.path
+                from model.cloth_masker import AutoMasker
+                from diffusers.image_processor import VaeImageProcessor
 
-        # Segformer labels:
-        # Background(0), Hat(1), Hair(2), Sunglasses(3), Upper-clothes(4),
-        # Skirt(5), Pants(6), Dress(7), Belt(8), Left-shoe(9), Right-shoe(10), Face(11),
-        # Left-leg(12), Right-leg(13), Left-arm(14), Right-arm(15), Left-hand(16), Right-hand(17)
+                densepose_ckpt = os.path.join(repo_path, "DensePose")
+                schp_ckpt = os.path.join(repo_path, "SCHP")
+
+                print("Initializing CatVTON AutoMasker (SCHP + DensePose)...")
+                self.automasker = AutoMasker(
+                    densepose_ckpt=densepose_ckpt,
+                    schp_ckpt=schp_ckpt,
+                    device=device_str
+                )
+                self.mask_processor = VaeImageProcessor(
+                    vae_scale_factor=8,
+                    do_normalize=False,
+                    do_binarize=True,
+                    do_convert_grayscale=True
+                )
+                print("AutoMasker initialized successfully.")
+            except ImportError as e:
+                print(f"Warning: AutoMasker import failed: {e}. Falling back to bounding-box mask.")
+            except Exception as e:
+                print(f"Warning: AutoMasker init failed: {e}. Falling back to bounding-box mask.")
+        else:
+            if self.device != "cuda":
+                print("Warning: No GPU detected. AutoMasker disabled — using bounding-box fallback.")
+            else:
+                print("Warning: No repo_path given to MaskGenerator. Using bounding-box fallback.")
+
+    def _garment_to_mask_type(self, category: str, garment_type: str = None) -> str:
+        """
+        Maps our garment_category + garment_type to CatVTON's mask_type.
+        CatVTON mask_type options: 'upper', 'lower', 'overall', 'inner', 'outer'
+        """
+        if category == "lower":
+            return "lower"
+        if category == "overall":
+            return "overall"
+        # category == "upper"
+        if garment_type and garment_type.strip().lower() in LONG_UPPER_GARMENTS:
+            # Long upper garments need the 'overall' mask so CatVTON can paint
+            # the garment body all the way down past the waist
+            return "overall"
+        return "upper"
 
     def generate_mask(self, person_image: Image.Image, category: str, garment_type: str = None) -> Image.Image:
         """
-        Stage B: Auto-Mask Generation.
-        Generates a binary mask of the region on the person where the garment will be placed.
+        Generates a cloth-agnostic mask for the region the garment will be applied to.
+        Uses CatVTON's AutoMasker (SCHP + DensePose) when available.
+        Falls back to a simple bounding-box mask if AutoMasker is unavailable.
         """
         w, h = person_image.size
+        mask_type = self._garment_to_mask_type(category, garment_type)
+        print(f"Generating mask with mask_type='{mask_type}' (garment_type='{garment_type}')")
 
-        if not self.segmenter:
-            # Fallback to bounding box
-            mask = np.zeros((h, w), dtype=np.uint8)
-            if category == "upper":
-                mask[int(h*0.15):int(h*0.65), int(w*0.15):int(w*0.85)] = 255
-            elif category == "lower":
-                mask[int(h*0.5):int(h*0.95), int(w*0.15):int(w*0.85)] = 255
-            else:
-                mask[int(h*0.15):int(h*0.95), int(w*0.15):int(w*0.85)] = 255
-            return Image.fromarray(mask)
+        # --- CatVTON AutoMasker path (preferred) ---
+        if self.automasker:
+            try:
+                result = self.automasker(person_image, mask_type=mask_type)
+                mask = result["mask"]  # PIL Image, already properly computed
+                return mask
+            except Exception as e:
+                print(f"AutoMasker inference failed: {e}. Falling back to bounding-box.")
 
-        # Run segmentation
-        results = self.segmenter(person_image)
-
+        # --- Bounding-box fallback ---
+        print("Using bounding-box fallback mask.")
         mask = np.zeros((h, w), dtype=np.uint8)
-        is_punjabi = bool(garment_type and "punjabi" in garment_type.lower())
-        is_kurta = bool(garment_type and "kurta" in garment_type.lower())
-        is_long_garment = is_punjabi or is_kurta
-
-        if category == "upper":
-            if is_long_garment:
-                # For long garments (punjabi/kurta), mask shirt + both arms + upper half of lower body
-                target_labels = ["Upper-clothes", "Left-arm", "Right-arm"]
-            else:
-                # Standard: only mask the existing shirt. Arms stay intact.
-                target_labels = ["Upper-clothes"]
-        elif category == "lower":
-            target_labels = ["Pants", "Skirt", "Left-leg", "Right-leg"]
-        else:  # overall / dress
-            target_labels = ["Upper-clothes", "Pants", "Dress", "Skirt", "Left-arm", "Right-arm"]
-
-        for result in results:
-            if result['label'] in target_labels:
-                label_mask = np.array(result['mask'])
-                mask[label_mask > 0] = 255
-
-        if is_long_garment:
-            # Extend the mask downward to cover the upper legs so the long body can be painted
-            # Find bottom edge of the current shirt mask
-            y_shirt = np.where(mask > 0)[0]
-            if len(y_shirt) > 0:
-                shirt_bottom = int(np.max(y_shirt))
-                # Extend the mask to 75% down the full image height
-                extension_bottom = int(h * 0.75)
-                if extension_bottom > shirt_bottom:
-                    # Use the horizontal extent of the shirt at its bottom to define the extension
-                    x_at_bottom = np.where(mask[shirt_bottom, :] > 0)[0]
-                    if len(x_at_bottom) > 0:
-                        x_left = max(0, int(np.min(x_at_bottom)) - 10)
-                        x_right = min(w, int(np.max(x_at_bottom)) + 10)
-                        mask[shirt_bottom:extension_bottom, x_left:x_right] = 255
-
-            kernel = np.ones((12, 12), np.uint8)
+        if mask_type == "upper":
+            mask[int(h*0.10):int(h*0.58), int(w*0.10):int(w*0.90)] = 255
+        elif mask_type == "overall":
+            mask[int(h*0.10):int(h*0.80), int(w*0.10):int(w*0.90)] = 255
+        elif mask_type == "lower":
+            mask[int(h*0.45):int(h*0.95), int(w*0.10):int(w*0.90)] = 255
         else:
-            kernel = np.ones((5, 5), np.uint8)
-
-        mask = cv2.dilate(mask, kernel, iterations=1)
+            mask[int(h*0.10):int(h*0.95), int(w*0.10):int(w*0.90)] = 255
         return Image.fromarray(mask)
