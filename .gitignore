@@ -54,3 +54,8 @@ dummy_fabric.jpg
 .Trashes
 ehthumbs.db
 Thumbs.db
+*.jpg
+*.png
+*.avif
+*.webp
+*.pt

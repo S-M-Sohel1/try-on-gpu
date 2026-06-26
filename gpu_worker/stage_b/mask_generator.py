@@ -69,18 +69,59 @@ class MaskGenerator:
     def generate_mask(self, person_image: Image.Image, category: str, garment_type: str = None) -> Image.Image:
         """
         Generates a cloth-agnostic mask for the region the garment will be applied to.
-        Uses CatVTON's AutoMasker (SCHP + DensePose) when available.
-        Falls back to a simple bounding-box mask if AutoMasker is unavailable.
+        Uses CatVTON's AutoMasker (SCHP + DensePose).
+        For long garments (Punjabi), we start with 'upper' mask and intelligently extend
+        it over the thighs using DensePose mapping.
         """
         w, h = person_image.size
-        mask_type = self._garment_to_mask_type(category, garment_type)
-        print(f"Generating mask with mask_type='{mask_type}' (garment_type='{garment_type}')")
+        
+        # We always start with "upper" or "lower" to ensure AutoMasker protects the correct half
+        base_mask_type = "upper" if category == "upper" else category
+        is_long_garment = (category == "upper" and garment_type and garment_type.strip().lower() in LONG_UPPER_GARMENTS)
+        
+        print(f"Generating mask with base_mask_type='{base_mask_type}' | long_garment={is_long_garment}")
 
         # --- CatVTON AutoMasker path (preferred) ---
         if self.automasker:
             try:
-                result = self.automasker(person_image, mask_type=mask_type)
-                mask = result["mask"]  # PIL Image, already properly computed
+                result = self.automasker(person_image, mask_type=base_mask_type)
+                mask = result["mask"]  # PIL Image
+                
+                # Smart Extension for Punjabi/Kurta
+                if is_long_garment:
+                    print("Applying DensePose mask extension for long garment (Punjabi/Kurta)...")
+                    mask_np = np.array(mask)
+                    dp_np = np.array(result["densepose"])
+                    
+                    if dp_np.shape[:2] != mask_np.shape[:2]:
+                        dp_np = cv2.resize(dp_np, (mask_np.shape[1], mask_np.shape[0]), interpolation=cv2.INTER_NEAREST)
+                    
+                    # DensePose Labels: Thighs (7,8,9,10), Hands (3,4)
+                    thigh_mask = np.isin(dp_np, [7, 8, 9, 10])
+                    hands_mask = np.isin(dp_np, [3, 4])
+                    
+                    y_idx, _ = np.where(thigh_mask)
+                    if len(y_idx) > 0:
+                        y_min, y_max = np.min(y_idx), np.max(y_idx)
+                        # Extend down 70% of the thighs
+                        y_cutoff = y_min + int((y_max - y_min) * 0.70)
+                        
+                        valid_thighs = thigh_mask & (np.indices(dp_np.shape)[0] < y_cutoff)
+                        
+                        extension = np.zeros_like(mask_np)
+                        extension[valid_thighs] = 255
+                        
+                        # Remove hands from extension (strict protection)
+                        extension[hands_mask] = 0
+                        
+                        # Smooth the extension slightly
+                        kernel = np.ones((11, 11), np.uint8)
+                        extension = cv2.dilate(extension, kernel, iterations=1)
+                        
+                        # Combine with base mask
+                        mask_np = np.clip(mask_np.astype(np.uint16) + extension.astype(np.uint16), 0, 255).astype(np.uint8)
+                        mask = Image.fromarray(mask_np)
+                
                 return mask
             except Exception as e:
                 print(f"AutoMasker inference failed: {e}. Falling back to bounding-box.")
@@ -88,11 +129,11 @@ class MaskGenerator:
         # --- Bounding-box fallback ---
         print("Using bounding-box fallback mask.")
         mask = np.zeros((h, w), dtype=np.uint8)
-        if mask_type == "upper":
-            mask[int(h*0.10):int(h*0.58), int(w*0.10):int(w*0.90)] = 255
-        elif mask_type == "overall":
+        if is_long_garment:
             mask[int(h*0.10):int(h*0.80), int(w*0.10):int(w*0.90)] = 255
-        elif mask_type == "lower":
+        elif category == "upper":
+            mask[int(h*0.10):int(h*0.58), int(w*0.10):int(w*0.90)] = 255
+        elif category == "lower":
             mask[int(h*0.45):int(h*0.95), int(w*0.10):int(w*0.90)] = 255
         else:
             mask[int(h*0.10):int(h*0.95), int(w*0.10):int(w*0.90)] = 255

@@ -27,12 +27,11 @@ def test_inference(url="https://pastime-confusion-job.ngrok-free.dev/"):
     # fabric_img.save("dummy_fabric.jpg")
 
     payload = {
-        "person_image": encode_image("inp.jpg"),
+        "person_image": encode_image("image.png"),
         "garment_image": encode_image("punjabi.avif"),
         "garment_category": "upper",
-        "garment_type": "punjabi"
+        "garment_type": "shirt"
     }
-
     url = url.rstrip('/')
     print(f"Sending request to {url}/infer...")
     start = time.time()
