@@ -39,10 +39,12 @@ async def startup_event():
     global mask_generator, catvton_runner
     print("Initializing models... This may take a while.")
 
-    # CatVTONRunner downloads the HF repo and exposes repo_path
+    # CatVTONRunner downloads CatVTON weights and exposes repo_path
     catvton_runner = CatVTONRunner()
 
-    # MaskGenerator uses repo_path to find SCHP + DensePose checkpoints
+    # MaskGenerator: uses Segformer (primary) for precise clothing masks.
+    # repo_path is passed so AutoMasker (SCHP+DensePose) can be used as fallback
+    # if Segformer fails to load.
     mask_generator = MaskGenerator(repo_path=catvton_runner.repo_path)
 
     print("All models initialized successfully.")
