@@ -95,7 +95,9 @@ class MaskGenerator:
                 label_mask = np.array(result["mask"])
                 mask[label_mask > 0] = 255
 
-        # For long garments, extend the mask downward from the shirt hem to cover thighs
+        # For long garments, extend the mask downward from the shirt hem to cover thighs.
+        # Use a tapering trapezoid (wide at top, narrower at bottom) instead of a rigid
+        # rectangle — prevents a visible boxy artifact on the output.
         if is_long and category == "upper":
             y_shirt = np.where(mask > 0)[0]
             if len(y_shirt) > 0:
@@ -104,9 +106,19 @@ class MaskGenerator:
                 if extension_bottom > shirt_bottom:
                     x_at_bottom = np.where(mask[shirt_bottom, :] > 0)[0]
                     if len(x_at_bottom) > 0:
-                        x_left = max(0, int(np.min(x_at_bottom)) - 10)
-                        x_right = min(w, int(np.max(x_at_bottom)) + 10)
-                        mask[shirt_bottom:extension_bottom, x_left:x_right] = 255
+                        x_left_top = max(0, int(np.min(x_at_bottom)) - 10)
+                        x_right_top = min(w, int(np.max(x_at_bottom)) + 10)
+                        mid_x = (x_left_top + x_right_top) // 2
+                        half_width_bottom = int((x_right_top - x_left_top) * 0.45)
+                        x_left_bot = max(0, mid_x - half_width_bottom)
+                        x_right_bot = min(w, mid_x + half_width_bottom)
+                        trap_pts = np.array([
+                            [x_left_top, shirt_bottom],
+                            [x_right_top, shirt_bottom],
+                            [x_right_bot, extension_bottom],
+                            [x_left_bot, extension_bottom]
+                        ], np.int32)
+                        cv2.fillPoly(mask, [trap_pts], 255)
 
         # Dilate to smooth edges — larger kernel for long garments
         kernel_size = 12 if is_long else 5
@@ -125,18 +137,18 @@ class MaskGenerator:
         return mask
 
     def _bbox_mask(self, person_image: Image.Image, category: str, garment_type: str = None) -> Image.Image:
-        """Last-resort bounding-box mask."""
+        """Last-resort bounding-box mask (now using ellipses for smoother fallback)."""
         w, h = person_image.size
         is_long = self._is_long_garment(garment_type)
         mask = np.zeros((h, w), dtype=np.uint8)
         if is_long and category == "upper":
-            mask[int(h * 0.10):int(h * 0.78), int(w * 0.10):int(w * 0.90)] = 255
+            cv2.ellipse(mask, (w // 2, int(h * 0.44)), (int(w * 0.40), int(h * 0.34)), 0, 0, 360, 255, -1)
         elif category == "upper":
-            mask[int(h * 0.15):int(h * 0.65), int(w * 0.15):int(w * 0.85)] = 255
+            cv2.ellipse(mask, (w // 2, int(h * 0.40)), (int(w * 0.35), int(h * 0.25)), 0, 0, 360, 255, -1)
         elif category == "lower":
-            mask[int(h * 0.50):int(h * 0.95), int(w * 0.15):int(w * 0.85)] = 255
+            cv2.ellipse(mask, (w // 2, int(h * 0.72)), (int(w * 0.35), int(h * 0.22)), 0, 0, 360, 255, -1)
         else:
-            mask[int(h * 0.15):int(h * 0.95), int(w * 0.15):int(w * 0.85)] = 255
+            cv2.ellipse(mask, (w // 2, int(h * 0.55)), (int(w * 0.35), int(h * 0.40)), 0, 0, 360, 255, -1)
         return Image.fromarray(mask)
 
     def generate_mask(self, person_image: Image.Image, category: str, garment_type: str = None) -> Image.Image:

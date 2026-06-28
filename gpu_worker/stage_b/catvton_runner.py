@@ -53,9 +53,18 @@ class CatVTONRunner:
         - mask: Binary mask of the region to replace (from AutoMasker).
         """
         if not self.pipeline:
+            import numpy as np
             # Dummy passthrough fallback (no GPU / failed load)
             person_image = person_image.convert("RGBA")
             garment_image = garment_image.resize(person_image.size).convert("RGBA")
+            
+            # Simple white background removal for the dummy fallback
+            g_np = np.array(garment_image)
+            white_thresh = 240
+            mask_white = (g_np[:,:,0] > white_thresh) & (g_np[:,:,1] > white_thresh) & (g_np[:,:,2] > white_thresh)
+            g_np[mask_white, 3] = 0
+            garment_image = Image.fromarray(g_np)
+            
             mask_l = mask.resize(person_image.size).convert("L")
             result = Image.composite(garment_image, person_image, mask_l)
             return result.convert("RGB")
