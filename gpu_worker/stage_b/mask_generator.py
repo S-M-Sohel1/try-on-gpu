@@ -80,20 +80,26 @@ class MaskGenerator:
         if category == "upper":
             if is_long:
                 # For long garments, include the shirt body + arms for a wider base
-                target_labels = {"Upper-clothes", "Left-arm", "Right-arm"}
+                target_labels = {"upper-clothes", "dress", "left-arm", "right-arm"}
             else:
                 # For regular shirts/t-shirts, mask only the garment body (not arms)
-                target_labels = {"Upper-clothes"}
+                target_labels = {"upper-clothes", "dress"}
         elif category == "lower":
-            target_labels = {"Pants", "Skirt", "Left-leg", "Right-leg"}
+            target_labels = {"pants", "skirt", "left-leg", "right-leg"}
         else:  # overall / dress
-            target_labels = {"Upper-clothes", "Pants", "Dress", "Skirt", "Left-arm", "Right-arm"}
+            target_labels = {"upper-clothes", "pants", "dress", "skirt", "left-arm", "right-arm"}
 
         mask = np.zeros((h, w), dtype=np.uint8)
         for result in results:
-            if result["label"] in target_labels:
+            if result["label"].lower() in target_labels:
                 label_mask = np.array(result["mask"])
                 mask[label_mask > 0] = 255
+
+        # If Segformer didn't find any matching clothing, the mask will be empty.
+        # We must raise an error so the fallback chain (AutoMasker -> BBox) triggers!
+        if np.max(mask) == 0:
+            raise ValueError(f"Segformer found no matching clothing labels for category '{category}'")
+
 
         # For long garments, extend the mask downward from the shirt hem to cover thighs.
         # Use a tapering trapezoid (wide at top, narrower at bottom) instead of a rigid
