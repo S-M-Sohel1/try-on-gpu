@@ -36,32 +36,40 @@ def evaluate_via_api(url="https://pastime-confusion-job.ngrok-free.dev/"):
         print(f"Test images not found! Please ensure '{person_img_path}' and '{garment_img_path}' exist.")
         return
 
-    payload = {
-        "person_image": encode_image(person_img_path),
-        "garment_image": encode_image(garment_img_path),
-        "garment_category": "upper",
-        "garment_type": "shirt",
-        "steps_list": [20, 30, 40, 50],
-        "scales_list": [1.5, 2.0, 2.5]
-    }
+    steps_to_test = [20, 30, 40, 50]
+    scales_to_test = [1.5, 2.0, 2.5]
     
-    try:
-        headers = {"ngrok-skip-browser-warning": "true"}
-        print("Sending evaluation request (this will take a few minutes)...")
-        response = requests.post(f"{url}/evaluate", json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        
-        results = data.get("results", [])
-        
-        results_file = os.path.join(root_dir, "experiment_results.tsv")
-        with open(results_file, 'w', newline='') as f:
-            writer = csv.writer(f, delimiter='\t')
-            writer.writerow(['Steps', 'Guidance Scale', 'Inference Time (s)', 'Saved Image'])
+    results_file = os.path.join(root_dir, "experiment_results.tsv")
+    
+    # Initialize the TSV file with headers
+    with open(results_file, 'w', newline='') as f:
+        writer = csv.writer(f, delimiter='\t')
+        writer.writerow(['Steps', 'Guidance Scale', 'Inference Time (s)', 'Saved Image'])
+
+    # Send individual requests for each combination to prevent ngrok timeouts (ERR_NGROK_3004)
+    for steps in steps_to_test:
+        for scale in scales_to_test:
+            payload = {
+                "person_image": encode_image(person_img_path),
+                "garment_image": encode_image(garment_img_path),
+                "garment_category": "upper",
+                "garment_type": "shirt",
+                "steps_list": [steps],
+                "scales_list": [scale]
+            }
             
-            for item in results:
-                steps = item["steps"]
-                scale = item["scale"]
+            try:
+                headers = {"ngrok-skip-browser-warning": "true"}
+                print(f"Sending evaluation request for Steps={steps}, Scale={scale}...")
+                response = requests.post(f"{url}/evaluate", json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                
+                results = data.get("results", [])
+                if not results:
+                    continue
+                
+                item = results[0]
                 time_taken = item["time_taken"]
                 output_b64 = item["output_image"]
                 
@@ -70,15 +78,19 @@ def evaluate_via_api(url="https://pastime-confusion-job.ngrok-free.dev/"):
                 img_path = os.path.join(root_dir, img_name)
                 decode_and_save_image(output_b64, img_path)
                 
-                print(f"Steps: {steps} | Guidance: {scale} | Time: {time_taken:.2f}s | Saved: {img_name}")
-                writer.writerow([steps, scale, f"{time_taken:.2f}", img_name])
+                print(f"Success! Time: {time_taken:.2f}s | Saved: {img_name}")
                 
-        print(f"\nEvaluation complete! Results saved to {results_file}")
-        
-    except Exception as e:
-        print(f"Evaluation request failed: {e}")
-        if 'response' in locals() and hasattr(response, 'text'):
-            print(f"Response text: {response.text}")
+                # Append to TSV file incrementally
+                with open(results_file, 'a', newline='') as f:
+                    writer = csv.writer(f, delimiter='\t')
+                    writer.writerow([steps, scale, f"{time_taken:.2f}", img_name])
+                
+            except Exception as e:
+                print(f"Request failed for Steps={steps}, Scale={scale}: {e}")
+                if 'response' in locals() and hasattr(response, 'text'):
+                    print(f"Response text: {response.text}")
+
+    print(f"\nEvaluation complete! Results saved to {results_file}")
 
 if __name__ == "__main__":
     evaluate_via_api()
