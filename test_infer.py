@@ -28,7 +28,7 @@ def test_inference(url="https://pastime-confusion-job.ngrok-free.dev/"):
 
     payload = {
         "person_image": encode_image("image.png"),
-        "garment_image": encode_image("punjabi.avif"),
+        "garment_image": encode_image("pun.webp"),
         "garment_category": "upper",
         "garment_type": "shirt"
     }

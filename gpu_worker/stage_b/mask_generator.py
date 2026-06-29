@@ -29,6 +29,11 @@ class MaskGenerator:
                 model="mattmdjaga/segformer_b2_clothes",
                 device=self.device
             )
+            print("Compiling Segformer for inference speedup...")
+            try:
+                self.segmenter.model = torch.compile(self.segmenter.model, mode="reduce-overhead")
+            except Exception as e:
+                print(f"Warning: Failed to compile Segformer: {e}")
             print("Segformer initialized successfully.")
         except Exception as e:
             print(f"Warning: Segformer failed to load: {e}. Will try AutoMasker fallback.")

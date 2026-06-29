@@ -15,6 +15,11 @@ class TextureMapper:
             self.pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
                 model_id, torch_dtype=torch.float16, safety_checker=None
             )
+            print("Compiling SD 1.5 UNet for inference speedup...")
+            try:
+                self.pipe.unet = torch.compile(self.pipe.unet, mode="reduce-overhead")
+            except Exception as e:
+                print(f"Warning: Failed to compile SD 1.5 UNet: {e}")
             # Offload to CPU when not in use to save VRAM for CatVTON and Segformer
             self.pipe.enable_model_cpu_offload()
         else:

@@ -37,6 +37,13 @@ class CatVTONRunner:
                     skip_safety_check=True,
                     device=self.device
                 )
+                
+                print("Compiling CatVTON UNet for inference speedup...")
+                try:
+                    self.pipeline.unet = torch.compile(self.pipeline.unet, mode="reduce-overhead")
+                except Exception as e:
+                    print(f"Warning: Failed to compile CatVTON UNet: {e}")
+                
                 print("CatVTON loaded successfully.")
             except ImportError as e:
                 print(f"Warning: CatVTON imports failed: {e}. Ensure CatVTON repo is cloned and in sys.path.")
